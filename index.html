@@ -1803,16 +1803,60 @@ function renderShiftList(){
   const list=document.getElementById('shift-list');list.innerHTML='';
   SHIFTS.forEach((s,i)=>{
     const row=document.createElement('div');row.className='shift-row';
+    row.dataset.si=i;
     const grpOpts=GROUPS.map(g=>`<option${s.group===g.name?' selected':''}>${g.name}</option>`).join('')+`<option${s.group==='なし'?' selected':''}>なし</option>`;
     const cntOpts=['0','0.5','1'].map(v=>`<option${String(s.count)===v?' selected':''}>${v}</option>`).join('');
-    row.innerHTML=`<div class="sh-handle">⠿</div><div class="sh-chip" style="background:${s.bg};color:${s.fg}" contenteditable="true" onblur="SHIFTS[${i}].l=this.textContent.trim();saveAll()">${s.l}</div><select class="sh-select" onchange="SHIFTS[${i}].count=parseFloat(this.value);saveAll()">${cntOpts}</select><select class="sh-select" onchange="SHIFTS[${i}].group=this.value;saveAll()">${grpOpts}</select><input type="color" value="${s.bg}" style="width:36px;height:32px;border:none;cursor:pointer;border-radius:4px" onchange="SHIFTS[${i}].bg=this.value;renderShiftList();saveAll()"><select class="sh-select" onchange="SHIFTS[${i}].visible=this.value==='表示';saveAll()"><option${s.visible?' selected':''}>表示</option><option${!s.visible?' selected':''}>非表示</option></select><div class="sh-del" onclick="removeShift(${i})">×</div>`;
+    row.innerHTML=`<div class="sh-handle">⠿</div><div class="sh-chip" style="background:${s.bg};color:${s.fg}" contenteditable="true">${s.l}</div><select class="sh-select sh-cnt">${cntOpts}</select><select class="sh-select sh-grp">${grpOpts}</select><input type="color" value="${s.bg}" class="sh-color" style="width:36px;height:32px;border:none;cursor:pointer;border-radius:4px"><select class="sh-select sh-vis"><option${s.visible?' selected':''}>表示</option><option${!s.visible?' selected':''}>非表示</option></select><div class="sh-del">×</div>`;
+    // イベントをaddEventListenerで登録（インライン式インデックス参照バグを回避）
+    const chip=row.querySelector('.sh-chip');
+    chip.addEventListener('blur',()=>{s.l=chip.textContent.trim();saveAll();});
+    row.querySelector('.sh-cnt').addEventListener('change',e=>{s.count=parseFloat(e.target.value);saveAll();});
+    row.querySelector('.sh-grp').addEventListener('change',e=>{s.group=e.target.value;saveAll();});
+    const colorIn=row.querySelector('.sh-color');
+    colorIn.addEventListener('change',e=>{s.bg=e.target.value;chip.style.background=e.target.value;saveAll();});
+    row.querySelector('.sh-vis').addEventListener('change',e=>{s.visible=e.target.value==='表示';saveAll();});
+    row.querySelector('.sh-del').addEventListener('click',()=>{if(!confirm('削除しますか？'))return;SHIFTS.splice(SHIFTS.indexOf(s),1);saveAll();renderShiftList();});
     list.appendChild(row);
   });
+
   const grpList=document.getElementById('grp-list');grpList.innerHTML='';
-  GROUPS.forEach((g,i)=>{
+  GROUPS.forEach(g=>{
     const row=document.createElement('div');row.className='grp-row';
-    const spOpts=['なし','shukyu','nenkyu'].map(v=>`<option value="${v}"${g.special===v?' selected':''}>${v==='なし'?'特殊なし':v==='shukyu'?'週休（差分表示）':'有給（残日数）'}</option>`).join('');
-    row.innerHTML=`<input class="grp-inp" value="${g.name}" onchange="GROUPS[${i}].name=this.value;renderShiftList();saveAll()"><select class="sh-select" onchange="GROUPS[${i}].special=this.value==='なし'?null:this.value;saveAll()">${spOpts}</select><div class="sh-del" onclick="removeGroup(${i})">×</div>`;
+    const spOpts=[
+      {v:'なし',  label:'特殊なし',          match:g.special===null},
+      {v:'shukyu',label:'週休（差分表示）',   match:g.special==='shukyu'},
+      {v:'nenkyu',label:'有給（残日数）',     match:g.special==='nenkyu'},
+    ].map(o=>`<option value="${o.v}"${o.match?' selected':''}>${o.label}</option>`).join('');
+    row.innerHTML=`<input class="grp-inp" value="${g.name}"><select class="sh-select grp-rule">${spOpts}</select><div class="sh-del grp-del">×</div>`;
+
+    // グループ名：oninputで即時反映、onblurで保存
+    const inp=row.querySelector('.grp-inp');
+    inp.addEventListener('input',()=>{
+      const oldName=g.name;
+      g.name=inp.value;
+      // 勤務種別の集計グループselectの選択肢を同期
+      document.querySelectorAll('#shift-list .sh-grp').forEach(sel=>{
+        Array.from(sel.options).forEach(opt=>{if(opt.text===oldName){opt.text=g.name;opt.value=g.name;}});
+        if(sel.value===oldName)sel.value=g.name;
+      });
+      // SHIFTSのgroup参照も旧名→新名
+      SHIFTS.forEach(s=>{if(s.group===oldName)s.group=g.name;});
+    });
+    inp.addEventListener('blur',()=>saveAll());
+
+    // 集計ルール
+    row.querySelector('.grp-rule').addEventListener('change',e=>{
+      g.special=e.target.value==='なし'?null:e.target.value;
+      saveAll();
+    });
+
+    // 削除
+    row.querySelector('.grp-del').addEventListener('click',()=>{
+      if(!confirm('削除しますか？'))return;
+      GROUPS.splice(GROUPS.indexOf(g),1);
+      saveAll();renderShiftList();
+    });
+
     grpList.appendChild(row);
   });
 }
@@ -1820,6 +1864,7 @@ function addShift(){SHIFTS.splice(SHIFTS.length-1,0,{k:'sh_'+Date.now(),l:'新�
 function removeShift(i){if(!confirm('削除しますか？'))return;SHIFTS.splice(i,1);saveAll();renderShiftList();}
 function addGroup(){GROUPS.push({name:'新グループ',special:null});saveAll();renderShiftList();}
 function removeGroup(i){if(!confirm('削除しますか？'))return;GROUPS.splice(i,1);saveAll();renderShiftList();}
+// updateGroupName は不要になったため削除
 
 /* ── Monthly Shukyu Kijun ── */
 let _mskYear = null; // 週休規定パネルで選択中の年
